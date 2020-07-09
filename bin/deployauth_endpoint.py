@@ -1,10 +1,17 @@
 import logging
+import base64
 import json
 import os, subprocess, sys
 import splunk.rest as rest
 import splunk.entity as entity
 from splunk.util import normalizeBoolean, readSplunkFile
 from splunk.persistconn.application import PersistentServerConnectionApplication
+
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s %(levelname)s [%(name)s:%(lineno)d] %(message)s',
+                    filename=os.path.join(os.environ.get('SPLUNK_HOME'), 'var', 'log', 'splunk',
+                                          'auth_deployment_server.log'),
+                    filemode='a')
 
 logger = logging.getLogger('splunk.rest')
 splunk_home     = os.path.normpath(os.environ["SPLUNK_HOME"])
@@ -55,18 +62,25 @@ class handler(PersistentServerConnectionApplication):
         name = query_params['name']
         supplied_pass4SymmKey = query_params['pass4SymmKey']
 
-        settings = entity.getEntity('/configs/conf-server', 'general', sessionKey=sessionKey) #namespace=self._namespace, owner=self._owner, sessionKey=self.sessionKey)
+        settings = entity.getEntity('/configs/conf-server', 'deployment', sessionKey=sessionKey)
         encrypted_pass4SymmKey = settings.get('pass4SymmKey')
 
         splunk_secret = readSplunkFile('etc/auth/splunk.secret')[0]
         expected_pass4SymmKey = decrypt(encrypted_pass4SymmKey)
 
+        #        expected_pass4SymmKey = expected_pass4SymmKey
         if supplied_pass4SymmKey != expected_pass4SymmKey:
             return self._unauthorised()
         else:
             download_url = "{}services/streams/deployment?name={}".format(rest.makeSplunkdUri(), name)
             app_resp, app_download = rest.simpleRequest(download_url, method='POST')
-            logger.warning(app_resp)
-            return {'payload': app_download,
-                    'status': 200          # HTTP status code
-                    }
+            #        logger.warning(app_resp)
+            payload = base64.b64encode(app_download)
+            resp = {
+                'payload_base64': payload,
+                'headers' : {
+                    'status' : app_resp['status'],
+                    'File-Name' : app_resp['file-name']
+                }
+            }
+            return resp
